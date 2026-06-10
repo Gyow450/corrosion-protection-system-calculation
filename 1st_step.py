@@ -1,6 +1,7 @@
-import sys
+import sys,json
 import numpy as np
-from scipy.interpolate import make_interp_spline, CubicSpline
+import pandas as pd
+from scipy.interpolate import  CubicSpline
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,QHBoxLayout,
     QLabel, QMessageBox,QGroupBox,QLineEdit,QRadioButton,QPushButton
@@ -159,7 +160,7 @@ class MainWindow(QMainWindow):
         self.label.setText("Ctrl+N 或 菜单→新建 被触发")
 
     @staticmethod
-    def _vertical_calculate(x:float|int,v:np.ndarray,reverse:bool=False)->np.ndarray:
+    def _vertical_calculate(x:float|int,v:np.ndarray|list[float|int],reverse:bool=False)->np.ndarray:
         """计算隶属向量"""
         mu:np.ndarray=np.array([0.0,0.0,0.0,0.0])
         u:np.ndarray=np.array([
@@ -209,22 +210,60 @@ class MainWindow(QMainWindow):
                     break 
         return min_v
     
+    @staticmethod
+    def _interpolate(y:pd.Series,x:np.ndarray|list,x_new:float)->float:
+        """插值计算"""
+        # 创建三次样条插值对象
+        cs = CubicSpline(np.array(x), y.to_numpy())
+        # 计算新的y值
+        y_new = cs(x_new)
+        return y_new
+
     def on_calculate(self):
         # coating_rg:np.ndarray=np.array([1.0,0.0,0.0,0.0])
         # coating_y:np.ndarray=np.array([1.0,0.0,0.0,0.0])
         # coating_p:np.ndarray=np.array([1.0,0.0,0.0,0.0])
-        if self.coat.isChecked() :
-            coating_rg=MainWindow._vertical_calculate(float(self.rg_input.text()),np.array([5,20,100]),True) if self.rg_input.text() else np.array([1.0,0.0,0.0,0.0])
-            coating_p=MainWindow._vertical_calculate(float(self.p_input.text()),np.array([0.1,0.5,1.0])) if self.p_input.text() else np.array([1.0,0.0,0.0,0.0])
-        else:
-            coating_rg=MainWindow._vertical_calculate(float(self.rg_input.text()),np.array([2,5,10]),True) if self.rg_input.text() else np.array([1.0,0.0,0.0,0.0])
-            coating_p=MainWindow._vertical_calculate(float(self.p_input.text()),np.array([0.2,1.0,2.0])) if self.p_input.text() else np.array([1.0,0.0,0.0,0.0])
+        with open("19285-2026.json",encoding="UTF-8") as f:
+            data=json.load(f)
+
+        d=float(self.d_input.text()) if self.d_input.text else 0.0
+        y_input=float(self.y_input.text()) if self.y_input.text else 1.0
+        p_input=float(self.p_input.text()) if self.p_input.text else 3.0
+        rg_input=float(self.rg_input.text()) if self.rg_input.text else 0.0
+        c_type="PE防腐层" if self.coat.isChecked() else "沥青防腐层"
+        coating_rg=MainWindow._vertical_calculate(rg_input,data[f"{c_type}Rg值区间"],True) 
+        coating_p=MainWindow._vertical_calculate(p_input,data[f"{c_type}P值区间"])
         
-        v_coat=MainWindow._compare(coating_rg,coating_p)
+        df=pd.DataFrame(data[f"{c_type}Y值区间"])
+        col=df.columns.to_list()
+        d_x=[float(t) for t in col]
+
+        if d<=min(d_x):
+            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str(min(d_x))]) 
+        elif d>=max(d_x):
+            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str]) 
+        else:
+            df["inter"]=df.apply(MainWindow._interpolate,axis=1,x=d_x,x_new=d)
+            coating_y=MainWindow._vertical_calculate(y_input,df["inter"]) 
+        # else:
+        #     coating_rg=MainWindow._vertical_calculate(float(self.rg_input.text()),data["沥青防腐层Rg值区间"],True) if self.rg_input.text() else np.array([1.0,0.0,0.0,0.0])
+        #     coating_p=MainWindow._vertical_calculate(float(self.p_input.text()),data["沥青防腐层P值区间"]) if self.p_input.text() else np.array([1.0,0.0,0.0,0.0])
+        #     if d<219:
+        #         coating_y=MainWindow._vertical_calculate(y_input,data["沥青防腐层Y值区间"]["219"]) 
+        #     elif d>914:
+        #         coating_y=MainWindow._vertical_calculate(y_input,data["沥青防腐层Y值区间"]["914"]) 
+        #     else:
+        #         df=pd.DataFrame(data["沥青防腐层Y值区间"])
+        #         col=df.columns.to_list()
+        #         d_x=[float(t) for t in col]
+        #         df["inter"]=df.apply(MainWindow._interpolate,axis=1,x=d_x,x_new=d)
+        #         coating_y=MainWindow._vertical_calculate(y_input,df["inter"]) 
+        
+        v_coat=MainWindow._compare(coating_rg,coating_p,coating_y)
         v_w=np.array([0.402,0.269,0.099,0.066,0.163])
         r_matrix=np.array(
             [
-                
+                v_coat,
             ]
         )
         QMessageBox.information(self, "计算", "计算功能尚未实现")
