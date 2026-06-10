@@ -18,6 +18,7 @@ dependencies = [
     "pyside6-addons==6.11.1",
     "pyside6-essentials==6.11.1",
     "python-dateutil==2.9.0.post0",
+    "scipy>=1.17.1",
     "shiboken6==6.11.1",
     "six==1.17.0",
 ]
