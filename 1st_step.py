@@ -1,6 +1,8 @@
 import sys,json
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
+from dataclasses import dataclass
 from scipy.interpolate import  CubicSpline
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,QHBoxLayout,QDialog,QTableWidget,QTableWidgetItem,
@@ -9,8 +11,46 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction, QKeySequence,QDoubleValidator
 from PySide6.QtCore import Qt
 
+@dataclass
+class CPSC_Data:
+    pip_d:float|None
+    c_rg:float|None
+    c_p:float|None
+    c_y:float|None
+    c_type:str|None
+    cp_value:float|None
+    cp_exist:str|None
+    dc_stray:float|None
+    ac_stray:float|None
+    soil_n:float|None
+    drainage:str|None
+
+    def __post_init__(self):
+        error_text=self.validate()
+        if error_text:
+            raise ValueError(error_text)
+
+    def validate(self):
+        errors = []
+        if not (self.pip_d and self.c_type):
+            errors.append("缺少管径,防腐层类型")
+        if not (self.c_rg or self.c_p or self.c_y):
+            errors.append("缺少外防腐层评价")
+        if not (self.dc_stray or self.ac_stray):
+            errors.append("缺少杂散电流评价")
+        if not self.cp_value:
+            errors.append("缺少阴极保护率")
+        if not self.soil_n:
+            errors.append("缺少土壤腐蚀性得分")
+        if not self.cp_exist:
+            errors.append("缺少是否有阴极保护")
+        if not self.drainage:
+            errors.append("缺少排流评价")
+        return "；".join(errors)
+
+
 class ResultDialog(QDialog):
-    def __init__(self,score:float,R:np.ndarray,parent = None):
+    def __init__(self,score:float,R:NDArray[np.float64],parent = None):
         super().__init__(parent)
         self.setWindowTitle("评价结果")
         self.resize(500, 450)
@@ -25,7 +65,7 @@ class ResultDialog(QDialog):
             Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
         )
         layout.addWidget(QLabel("评价文本："))
-        result_text = f"腐蚀防护系统质量评价得分为{score}，"
+        result_text = f"腐蚀防护系统质量评价得分为{score:.2f}，"
         if score>=90:
             result_text+='等级评价为“1”级，系统功能完好，满足设计要求，在6年的检验周期内能有效使用'
         elif score>=80:
@@ -52,7 +92,7 @@ class ResultDialog(QDialog):
         self.table.setVerticalHeaderLabels(headers)
         for i in range(rows):
             for j in range(cols):
-                item = QTableWidgetItem(str(R[i, j]))
+                item = QTableWidgetItem(f"{R[i, j]:.3f}")
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(i, j,item)
         detail_layout.addWidget(self.table)
@@ -212,10 +252,12 @@ class MainWindow(QMainWindow):
         self.label.setText("Ctrl+N 或 菜单→新建 被触发")
 
     @staticmethod
-    def _vertical_calculate(x:float|int,v:np.ndarray|list[float|int],reverse:bool=False)->np.ndarray:
+    def _vertical_calculate(x:float|int|None,v:NDArray[np.float64]|list[float|int],reverse:bool=False)->NDArray[np.float64]:
         """计算隶属向量,越大越安全的参数需最后反转"""
-        mu:np.ndarray=np.array([0.0,0.0,0.0,0.0])
-        u:np.ndarray=np.array([
+        if x is None:
+            x = 0.0 if reverse else 10000.0
+        mu:NDArray[np.float64]=np.array([0.0,0.0,0.0,0.0])
+        u:NDArray[np.float64]=np.array([
             (v[0]+v[1])/2,
             (v[1]+v[2])/2,
         ])
@@ -252,9 +294,9 @@ class MainWindow(QMainWindow):
         return mu
     
     @staticmethod
-    def _compare(*vs:np.ndarray)->np.ndarray:
+    def _compare(*vs:NDArray[np.float64])->NDArray[np.float64]:
         """比较隶属向量，返回最小值"""
-        min_v:np.ndarray=np.array([1.0,0.0,0.0,0.0])
+        min_v:NDArray[np.float64]=np.array([1.0,0.0,0.0,0.0])
         for v in vs:
             for i in range(4):
                 if v[i]<min_v[i]:
@@ -265,7 +307,7 @@ class MainWindow(QMainWindow):
         return min_v
     
     @staticmethod
-    def _interpolate(y:pd.Series,x:np.ndarray|list,x_new:float)->float:
+    def _interpolate(y:pd.Series,x:NDArray[np.float64]|list[float],x_new:float)->float:
         """插值计算"""
         # 创建三次样条插值对象
         cs = CubicSpline(np.array(x), y.to_numpy())
@@ -274,29 +316,84 @@ class MainWindow(QMainWindow):
         return y_new
 
     def on_calculate(self):
-        # coating_rg:np.ndarray=np.array([1.0,0.0,0.0,0.0])
-        # coating_y:np.ndarray=np.array([1.0,0.0,0.0,0.0])
-        # coating_p:np.ndarray=np.array([1.0,0.0,0.0,0.0])
-        with open("19285-2026.json",encoding="UTF-8") as f:
-            data=json.load(f)
-
-        #   防腐层隶属向量计算
-        d=float(self.d_input.text()) if self.d_input.text() else 0.0
-        y_input=float(self.y_input.text()) if self.y_input.text() else 1.0
-        p_input=float(self.p_input.text()) if self.p_input.text() else 3.0
-        rg_input=float(self.rg_input.text()) if self.rg_input.text() else 0.0
-        c_type="PE防腐层" if self.coat.isChecked() else "沥青防腐层"
-        coating_rg=MainWindow._vertical_calculate(rg_input,data[f"{c_type}Rg值区间"],True) 
-        coating_p=MainWindow._vertical_calculate(p_input,data[f"{c_type}P值区间"])
         
-        df=pd.DataFrame(data[f"{c_type}Y值区间"])
+       
+        #   防腐层隶属向量计算
+        d=float(self.d_input.text()) if self.d_input.text() else None
+        y_input=float(self.y_input.text()) if self.y_input.text() else None
+        p_input=float(self.p_input.text()) if self.p_input.text() else None
+        rg_input=float(self.rg_input.text()) if self.rg_input.text() else None
+        
+        c_type="PE防腐层" if self.coat.isChecked() else "沥青防腐层"
+        if not self.coat.isChecked() and not self.coat_0.isChecked():
+            c_type = None
+        
+        #   阴极保护隶属向量计算
+        cp_input=0.01*float(self.cp_input.text()) if self.cp_input.text() else None
+        # v_cp=MainWindow._vertical_calculate(cp_input,data["阴极保护区间"],True)
+        
+        #   土壤腐蚀性隶属向量计算
+        soil_input=float(self.soil_input.text()) if self.soil_input.text() else None
+        # v_soil=MainWindow._vertical_calculate(soil_input,data["土壤腐蚀性区间"])
+
+        #   杂散电流隶属向量计算
+        cp_exist='有阴保' if self.cp.isChecked  else '无阴保'
+        if not self.cp.isChecked() and not self.cp_0.isChecked():
+            cp_exist=None
+        stray_input=0.01*float(self.stray_input.text()) if self.stray_input.text() else None
+        stray_input_ac=float(self.ac_input.text()) if self.ac_input.text() else None
+   
+
+        #   排流隶属向量
+        # v_dra = np.array([1.0,0.0,0.0,0.0] if self.drainage.isChecked() else [0.0,0.0,0.0,1.0]) 
+        drainage_eff='有效' if self.drainage.isChecked() else '无效'
+        if not self.drainage.isChecked() and not self.drainage_0.isChecked():
+            drainage_eff=None
+        
+        try:
+            data0 = CPSC_Data(
+                pip_d=d,
+                c_rg=rg_input,
+                c_p=p_input,
+                c_y=y_input,
+                c_type=c_type,
+                cp_exist=cp_exist,
+                cp_value=cp_input,
+                dc_stray=stray_input,
+                ac_stray=stray_input_ac,
+                soil_n=soil_input,
+                drainage=drainage_eff
+            )
+            result=self.calculate(data=data0)
+            self.show_result(R=result[0],final_score=result[1])
+        except ValueError as e:
+            QMessageBox.warning(self, "输入验证失败", str(e))
+    
+    @classmethod
+    def calculate(cls,data:CPSC_Data)->tuple[NDArray[np.float64],float]:
+        """根据参数计算隶属矩阵和评分"""
+        with open("19285-2026.json",encoding="UTF-8") as f:
+            CONFIG=json.load(f)
+        
+        #   防腐层隶属向量计算
+        d = data.pip_d
+        y_input = data.c_y if data.c_y else 0.0
+        p_input = data.c_p if data.c_p else 0.0
+        rg_input = data.c_rg if data.c_rg else 150.0
+        
+        c_type = data.c_type
+        
+        coating_rg=MainWindow._vertical_calculate(rg_input,CONFIG[f"{c_type}Rg值区间"],True) 
+        coating_p=MainWindow._vertical_calculate(p_input,CONFIG[f"{c_type}P值区间"])
+        
+        df=pd.DataFrame(CONFIG[f"{c_type}Y值区间"])
         col=df.columns.to_list()
         d_x=[float(t) for t in col]
 
         if d<=min(d_x):
-            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str(int(min(d_x)))]) 
+            coating_y=MainWindow._vertical_calculate(y_input,CONFIG[f"{c_type}Y值区间"][str(int(min(d_x)))]) 
         elif d>=max(d_x):
-            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str(int(max(d_x)))]) 
+            coating_y=MainWindow._vertical_calculate(y_input,CONFIG[f"{c_type}Y值区间"][str(int(max(d_x)))]) 
         else:
             df["inter"]=df.apply(MainWindow._interpolate,axis=1,x=d_x,x_new=d)
             coating_y=MainWindow._vertical_calculate(y_input,df["inter"]) 
@@ -304,25 +401,25 @@ class MainWindow(QMainWindow):
         v_coat=MainWindow._compare(coating_rg,coating_p,coating_y)
         
         #   阴极保护隶属向量计算
-        cp_input=0.01*float(self.cp_input.text())
-        v_cp=MainWindow._vertical_calculate(cp_input,data["阴极保护区间"],True)
+        cp_input=0.01*data.cp_value
+        v_cp=MainWindow._vertical_calculate(cp_input,CONFIG["阴极保护区间"],True)
         
         #   土壤腐蚀性隶属向量计算
-        soil_input=float(self.soil_input.text())
-        v_soil=MainWindow._vertical_calculate(soil_input,data["土壤腐蚀性区间"])
+        soil_input=data.soil_n
+        v_soil=MainWindow._vertical_calculate(soil_input,CONFIG["土壤腐蚀性区间"])
 
         #   杂散电流隶属向量计算
-        cp_exist='有阴保' if self.cp.isChecked else '无阴保'
-        stray_input=0.01*float(self.stray_input.text()) if self.stray_input.text() else 1.0
-        stray_input_ac=float(self.ac_input.text()) if self.ac_input.text() else 200
-        v_dc=MainWindow._vertical_calculate(stray_input,data[f"直流干扰区间-{cp_exist}"])
-        v_ac=MainWindow._vertical_calculate(stray_input_ac,data["交流干扰区间"])
+        cp_exist=data.cp_exist
+        stray_input=0.01*data.dc_stray if data.dc_stray else 0.0
+        stray_input_ac=data.ac_stray if data.ac_stray else 0.0
+        v_dc=MainWindow._vertical_calculate(stray_input,CONFIG[f"直流干扰区间-{cp_exist}"])
+        v_ac=MainWindow._vertical_calculate(stray_input_ac,CONFIG["交流干扰区间"])
         v_stray=MainWindow._compare(v_dc,v_ac)
 
         #   排流隶属向量
-        v_dra = np.array([1.0,0.0,0.0,0.0] if self.drainage.isChecked() else [0.0,0.0,0.0,1.0]) 
+        v_dra = np.array([1.0,0.0,0.0,0.0] if data.drainage == '有效' else [0.0,0.0,0.0,1.0]) 
 
-        v_w=np.array([0.402,0.269,0.099,0.066,0.163])
+        v_w:NDArray[np.float64]=np.array([0.402,0.269,0.099,0.066,0.163])
         R_matrix=np.array(
             [
                 v_coat,
@@ -332,6 +429,7 @@ class MainWindow(QMainWindow):
                 v_dra
             ]
         )
+        R_matrix:NDArray[np.float64]=np.where(np.abs(R_matrix)<1e-5,0.0,R_matrix)
         v_a=v_w@R_matrix
         c_h=np.array([100,89,79,69])
         c_m=np.array([95,85,75,65])
@@ -341,9 +439,9 @@ class MainWindow(QMainWindow):
         s_l=np.sum(v_a*c_l)/np.sum(v_a)
         s_=(s_h+s_m+s_l)/3.00
 
-        QMessageBox.information(self, "计算结果", f"评价得分为{s_:.2f}")
+        return (R_matrix,s_)
 
-        self.show_result(R=R_matrix,final_score=s_)
+
 
     def show_result(self,R,final_score):
         dialog=ResultDialog(parent=self,R=R,score=final_score)
