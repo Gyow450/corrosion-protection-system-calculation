@@ -3,10 +3,62 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import  CubicSpline
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout,QHBoxLayout,
-    QLabel, QMessageBox,QGroupBox,QLineEdit,QRadioButton,QPushButton
+    QApplication, QMainWindow, QWidget, QVBoxLayout,QHBoxLayout,QDialog,QTableWidget,QTableWidgetItem,
+    QLabel, QMessageBox,QGroupBox,QLineEdit,QRadioButton,QPushButton,QTextEdit
 )
 from PySide6.QtGui import QAction, QKeySequence,QDoubleValidator
+from PySide6.QtCore import Qt
+
+class ResultDialog(QDialog):
+    def __init__(self,score:float,R:np.ndarray,parent = None):
+        super().__init__(parent)
+        self.setWindowTitle("评价结果")
+        self.resize(500, 450)
+
+        layout = QVBoxLayout()
+        
+        # ===== 1. 长文本评价区（只读，但可鼠标选中复制）=====
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)  # 禁止编辑，但保留选中
+        # 确保文本可被鼠标选中
+        self.text_edit.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        layout.addWidget(QLabel("评价文本："))
+        result_text = f"腐蚀防护系统质量评价得分为{score}，"
+        if score>=90:
+            result_text+='等级评价为“1”级，系统功能完好，满足设计要求，在6年的检验周期内能有效使用'
+        elif score>=80:
+            result_text+='等级评价为“2”级，系统基本完好但存在一些不影响防护效果的缺陷,能基本满足设计要求,3年~6年的检验周期内能使用'
+        elif score>=70:
+            result_text+='等级评价为“3”级，系统整体状况较差，存在缺陷，不能完全满足设计要求，在使用单位采取适当措施后，可在1年~3年检验周期内在限定的条件下使用'
+        else:
+            result_text+='等级评价为“4”级，系统缺陷严重,不能满足设计要求,不能有效防止金属管体腐蚀,使用单位应采取重大维修'
+        self.text_edit.setPlainText(result_text)
+        layout.addWidget(self.text_edit)
+        self.detail_matrix=QGroupBox('隶属矩阵')
+        detail_layout=QVBoxLayout()
+        rows,cols=R.shape
+        headers=[
+            '外防腐层状况',
+            '阴极保护有效性',
+            '土壤腐蚀性',
+            '杂散电流干扰',
+            '排流效果'
+            ]
+        self.table=QTableWidget()
+        self.table.setRowCount(rows)
+        self.table.setColumnCount(cols)
+        self.table.setVerticalHeaderLabels(headers)
+        for i in range(rows):
+            for j in range(cols):
+                item = QTableWidgetItem(str(R[i, j]))
+                item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(i, j,item)
+        detail_layout.addWidget(self.table)
+        self.detail_matrix.setLayout(detail_layout)
+        layout.addWidget(self.detail_matrix)
+        self.setLayout(layout)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -288,8 +340,14 @@ class MainWindow(QMainWindow):
         s_m=np.sum(v_a*c_m)/np.sum(v_a)
         s_l=np.sum(v_a*c_l)/np.sum(v_a)
         s_=(s_h+s_m+s_l)/3.00
+
         QMessageBox.information(self, "计算结果", f"评价得分为{s_:.2f}")
 
+        self.show_result(R=R_matrix,final_score=s_)
+
+    def show_result(self,R,final_score):
+        dialog=ResultDialog(parent=self,R=R,score=final_score)
+        dialog.exec()
 
 app = QApplication(sys.argv)
 w = MainWindow()
