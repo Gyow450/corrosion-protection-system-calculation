@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         self.cp_0=QRadioButton("未实施阴极保护")
         stray_layout.addWidget(self.cp)
         stray_layout.addWidget(self.cp_0)
-        stray_layout.addWidget(QLabel("动态直流干扰-电位正于阴保要求的占比%"))
+        stray_layout.addWidget(QLabel("动态直流干扰-电位正于阴保要求（或正于自然电位20mV）的占比%"))
         self.stray_input=QLineEdit()
         self.stray_input.setValidator(QDoubleValidator(0.1, 100.0, 1))  # 设置输入范围和小数位数
         self.stray_input.setPlaceholderText("请输入0.1-100.0的数值")
@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _vertical_calculate(x:float|int,v:np.ndarray|list[float|int],reverse:bool=False)->np.ndarray:
-        """计算隶属向量"""
+        """计算隶属向量,越大越安全的参数需最后反转"""
         mu:np.ndarray=np.array([0.0,0.0,0.0,0.0])
         u:np.ndarray=np.array([
             (v[0]+v[1])/2,
@@ -207,7 +207,9 @@ class MainWindow(QMainWindow):
             for i in range(4):
                 if v[i]<min_v[i]:
                     min_v=v
-                    break 
+                    break
+                elif v[i]>min_v[i]:
+                    break
         return min_v
     
     @staticmethod
@@ -226,10 +228,11 @@ class MainWindow(QMainWindow):
         with open("19285-2026.json",encoding="UTF-8") as f:
             data=json.load(f)
 
-        d=float(self.d_input.text()) if self.d_input.text else 0.0
-        y_input=float(self.y_input.text()) if self.y_input.text else 1.0
-        p_input=float(self.p_input.text()) if self.p_input.text else 3.0
-        rg_input=float(self.rg_input.text()) if self.rg_input.text else 0.0
+        #   防腐层隶属向量计算
+        d=float(self.d_input.text()) if self.d_input.text() else 0.0
+        y_input=float(self.y_input.text()) if self.y_input.text() else 1.0
+        p_input=float(self.p_input.text()) if self.p_input.text() else 3.0
+        rg_input=float(self.rg_input.text()) if self.rg_input.text() else 0.0
         c_type="PE防腐层" if self.coat.isChecked() else "沥青防腐层"
         coating_rg=MainWindow._vertical_calculate(rg_input,data[f"{c_type}Rg值区间"],True) 
         coating_p=MainWindow._vertical_calculate(p_input,data[f"{c_type}P值区间"])
@@ -239,34 +242,53 @@ class MainWindow(QMainWindow):
         d_x=[float(t) for t in col]
 
         if d<=min(d_x):
-            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str(min(d_x))]) 
+            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str(int(min(d_x)))]) 
         elif d>=max(d_x):
-            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str]) 
+            coating_y=MainWindow._vertical_calculate(y_input,data[f"{c_type}Y值区间"][str(int(max(d_x)))]) 
         else:
             df["inter"]=df.apply(MainWindow._interpolate,axis=1,x=d_x,x_new=d)
             coating_y=MainWindow._vertical_calculate(y_input,df["inter"]) 
-        # else:
-        #     coating_rg=MainWindow._vertical_calculate(float(self.rg_input.text()),data["沥青防腐层Rg值区间"],True) if self.rg_input.text() else np.array([1.0,0.0,0.0,0.0])
-        #     coating_p=MainWindow._vertical_calculate(float(self.p_input.text()),data["沥青防腐层P值区间"]) if self.p_input.text() else np.array([1.0,0.0,0.0,0.0])
-        #     if d<219:
-        #         coating_y=MainWindow._vertical_calculate(y_input,data["沥青防腐层Y值区间"]["219"]) 
-        #     elif d>914:
-        #         coating_y=MainWindow._vertical_calculate(y_input,data["沥青防腐层Y值区间"]["914"]) 
-        #     else:
-        #         df=pd.DataFrame(data["沥青防腐层Y值区间"])
-        #         col=df.columns.to_list()
-        #         d_x=[float(t) for t in col]
-        #         df["inter"]=df.apply(MainWindow._interpolate,axis=1,x=d_x,x_new=d)
-        #         coating_y=MainWindow._vertical_calculate(y_input,df["inter"]) 
-        
+
         v_coat=MainWindow._compare(coating_rg,coating_p,coating_y)
+        
+        #   阴极保护隶属向量计算
+        cp_input=0.01*float(self.cp_input.text())
+        v_cp=MainWindow._vertical_calculate(cp_input,data["阴极保护区间"],True)
+        
+        #   土壤腐蚀性隶属向量计算
+        soil_input=float(self.soil_input.text())
+        v_soil=MainWindow._vertical_calculate(soil_input,data["土壤腐蚀性区间"])
+
+        #   杂散电流隶属向量计算
+        cp_exist='有阴保' if self.cp.isChecked else '无阴保'
+        stray_input=0.01*float(self.stray_input.text()) if self.stray_input.text() else 1.0
+        stray_input_ac=float(self.ac_input.text()) if self.ac_input.text() else 200
+        v_dc=MainWindow._vertical_calculate(stray_input,data[f"直流干扰区间-{cp_exist}"])
+        v_ac=MainWindow._vertical_calculate(stray_input_ac,data["交流干扰区间"])
+        v_stray=MainWindow._compare(v_dc,v_ac)
+
+        #   排流隶属向量
+        v_dra = np.array([1.0,0.0,0.0,0.0] if self.drainage.isChecked() else [0.0,0.0,0.0,1.0]) 
+
         v_w=np.array([0.402,0.269,0.099,0.066,0.163])
-        r_matrix=np.array(
+        R_matrix=np.array(
             [
                 v_coat,
+                v_cp,
+                v_soil,
+                v_stray,
+                v_dra
             ]
         )
-        QMessageBox.information(self, "计算", "计算功能尚未实现")
+        v_a=v_w@R_matrix
+        c_h=np.array([100,89,79,69])
+        c_m=np.array([95,85,75,65])
+        c_l=np.array([90,80,70,60])
+        s_h=np.sum(v_a*c_h)/np.sum(v_a)
+        s_m=np.sum(v_a*c_m)/np.sum(v_a)
+        s_l=np.sum(v_a*c_l)/np.sum(v_a)
+        s_=(s_h+s_m+s_l)/3.00
+        QMessageBox.information(self, "计算结果", f"评价得分为{s_:.2f}")
 
 
 app = QApplication(sys.argv)
