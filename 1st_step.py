@@ -53,7 +53,7 @@ class ResultDialog(QDialog):
     def __init__(self,score:float,R:NDArray[np.float64],parent = None):
         super().__init__(parent)
         self.setWindowTitle("评价结果")
-        self.resize(500, 450)
+        self.resize(600, 500)
 
         layout = QVBoxLayout()
         
@@ -96,9 +96,53 @@ class ResultDialog(QDialog):
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(i, j,item)
         detail_layout.addWidget(self.table)
+
+        lines = ["$\\begin{bmatrix}"]
+    
+        for row in R:
+            line = "    " + " & ".join(f"{x:.3f}" for x in row) + " \\\\"
+            lines.append(line)
+        
+        lines.append("\\end{bmatrix}$")
+
+        self.latex_text = "\n".join(lines)
+        
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_copy_table = QPushButton("📊 复制表格到 Excel")
+        btn_copy_latex = QPushButton("📄 复制 LaTeX")
+        btn_copy_table.clicked.connect(self._copy_table)
+        btn_copy_latex.clicked.connect(self._copy_latex)
+
+        btn_row.addWidget(btn_copy_table)
+        btn_row.addWidget(btn_copy_latex)
+        btn_row.addStretch()
+        detail_layout.addLayout(btn_row)
         self.detail_matrix.setLayout(detail_layout)
         layout.addWidget(self.detail_matrix)
         self.setLayout(layout)
+
+    def _copy_table(self):
+        """把整个表格转为制表符分隔文本，写入剪贴板"""
+        table = self.table
+
+        rows = table.rowCount()
+        cols = table.columnCount()
+        
+        lines = []
+      
+        for r in range(rows):
+            line = [table.item(r, c).text() for c in range(cols)]
+            lines.append("\t".join(line))
+        
+        text = "\n".join(lines)
+        QApplication.clipboard().setText(text)
+
+    def _copy_latex(self):
+        """复制 LaTeX 公式源码到系统剪贴板"""
+        text = self.latex_text
+        QApplication.clipboard().setText(text)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -329,7 +373,7 @@ class MainWindow(QMainWindow):
             c_type = None
         
         #   阴极保护隶属向量计算
-        cp_input=0.01*float(self.cp_input.text()) if self.cp_input.text() else None
+        cp_input=float(self.cp_input.text()) if self.cp_input.text() else None
         # v_cp=MainWindow._vertical_calculate(cp_input,data["阴极保护区间"],True)
         
         #   土壤腐蚀性隶属向量计算
@@ -337,10 +381,10 @@ class MainWindow(QMainWindow):
         # v_soil=MainWindow._vertical_calculate(soil_input,data["土壤腐蚀性区间"])
 
         #   杂散电流隶属向量计算
-        cp_exist='有阴保' if self.cp.isChecked  else '无阴保'
+        cp_exist='有阴保' if self.cp.isChecked()  else '无阴保'
         if not self.cp.isChecked() and not self.cp_0.isChecked():
             cp_exist=None
-        stray_input=0.01*float(self.stray_input.text()) if self.stray_input.text() else None
+        stray_input=float(self.stray_input.text()) if self.stray_input.text() else None
         stray_input_ac=float(self.ac_input.text()) if self.ac_input.text() else None
    
 
