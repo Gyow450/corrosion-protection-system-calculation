@@ -47,16 +47,9 @@ class CPSC_Data:
         if not self.drainage:
             errors.append("缺少排流评价")
         return "；".join(errors)
-
-
-class ResultDialog(QDialog):
-    def __init__(self,score:float,R:NDArray[np.float64],data:dict[str,str|float|None],parent = None):
-        super().__init__(parent)
-        self.setWindowTitle("评价结果")
-        self.resize(600, 700)
-
-        layout = QVBoxLayout()
-        
+    
+    @classmethod
+    def alias_map(cls)->dict[str,str]:
         mapping_table={
             'pip_d':'管径（mm）',
             'c_type':'防腐层类型',
@@ -69,8 +62,19 @@ class ResultDialog(QDialog):
             'ac_stray':'交流电流密度',
             'soil_n':'土壤腐蚀性评价N值',
             'drainage':'排流效果',
-
         }
+        return mapping_table
+
+
+class ResultDialog(QDialog):
+    def __init__(self,score:float,R:NDArray[np.float64],data:dict[str,str|float|None],parent = None):
+        super().__init__(parent)
+        self.setWindowTitle("评价结果")
+        self.resize(600, 700)
+
+        layout = QVBoxLayout()
+        
+        
         # ===== 数据区、评价区（只读，但可鼠标选中复制）=====
         self.data_text_edit=QTextEdit()
         self.data_text_edit.setReadOnly(True)  # 禁止编辑，但保留选中
@@ -87,7 +91,7 @@ class ResultDialog(QDialog):
         self.result_text_edit.setFixedHeight(100)
         data_text=''
         for key,value in data.items():
-            data_text += f"{mapping_table[key]}：{value}；" if value else ''
+            data_text += f"{CPSC_Data.alias_map()[key]}：{value}；" if value else ''
         result_text = f"腐蚀防护系统质量评价得分为{score:.2f}，"
         if score>=90:
             result_text+='等级评价为“1”级，系统功能完好，满足设计要求，在6年的检验周期内能有效使用'
