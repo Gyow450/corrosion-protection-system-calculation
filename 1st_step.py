@@ -2,7 +2,7 @@ import sys,json
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass,asdict
 from scipy.interpolate import  CubicSpline
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,QHBoxLayout,QDialog,QTableWidget,QTableWidgetItem,
@@ -14,15 +14,15 @@ from PySide6.QtCore import Qt
 @dataclass
 class CPSC_Data:
     pip_d:float|None
+    c_type:str|None
     c_rg:float|None
     c_p:float|None
     c_y:float|None
-    c_type:str|None
-    cp_value:float|None
     cp_exist:str|None
+    cp_value:float|None
+    soil_n:float|None
     dc_stray:float|None
     ac_stray:float|None
-    soil_n:float|None
     drainage:str|None
 
     def __post_init__(self):
@@ -50,21 +50,44 @@ class CPSC_Data:
 
 
 class ResultDialog(QDialog):
-    def __init__(self,score:float,R:NDArray[np.float64],parent = None):
+    def __init__(self,score:float,R:NDArray[np.float64],data:dict[str,str|float|None],parent = None):
         super().__init__(parent)
         self.setWindowTitle("评价结果")
-        self.resize(600, 500)
+        self.resize(600, 700)
 
         layout = QVBoxLayout()
         
-        # ===== 1. 长文本评价区（只读，但可鼠标选中复制）=====
-        self.text_edit = QTextEdit()
-        self.text_edit.setReadOnly(True)  # 禁止编辑，但保留选中
+        mapping_table={
+            'pip_d':'管径（mm）',
+            'c_type':'防腐层类型',
+            'c_rg':'防腐层绝缘电阻率Rg值（kΩ·㎡）',
+            'c_p':'防腐层破损点密度P值（处/100m）',
+            'c_y':'防腐层电流衰减率Y值（dB/m）',
+            'cp_value':'阴极保护率',
+            'cp_exist':'是否建设有阴极保护',
+            'dc_stray':'阴保管道电位正于要求的比例或无阴保管道正于自然电位20mV的比例',
+            'ac_stray':'交流电流密度',
+            'soil_n':'土壤腐蚀性评价N值',
+            'drainage':'排流效果',
+
+        }
+        # ===== 数据区、评价区（只读，但可鼠标选中复制）=====
+        self.data_text_edit=QTextEdit()
+        self.data_text_edit.setReadOnly(True)  # 禁止编辑，但保留选中
+        self.result_text_edit = QTextEdit()
+        self.result_text_edit.setReadOnly(True)  # 禁止编辑，但保留选中
         # 确保文本可被鼠标选中
-        self.text_edit.setTextInteractionFlags(
+        self.result_text_edit.setTextInteractionFlags(
             Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
         )
-        layout.addWidget(QLabel("评价文本："))
+        self.data_text_edit.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        self.data_text_edit.setFixedHeight(100)
+        self.result_text_edit.setFixedHeight(100)
+        data_text=''
+        for key,value in data.items():
+            data_text += f"{mapping_table[key]}：{value}；" if value else ''
         result_text = f"腐蚀防护系统质量评价得分为{score:.2f}，"
         if score>=90:
             result_text+='等级评价为“1”级，系统功能完好，满足设计要求，在6年的检验周期内能有效使用'
@@ -74,8 +97,15 @@ class ResultDialog(QDialog):
             result_text+='等级评价为“3”级，系统整体状况较差，存在缺陷，不能完全满足设计要求，在使用单位采取适当措施后，可在1年~3年检验周期内在限定的条件下使用'
         else:
             result_text+='等级评价为“4”级，系统缺陷严重,不能满足设计要求,不能有效防止金属管体腐蚀,使用单位应采取重大维修'
-        self.text_edit.setPlainText(result_text)
-        layout.addWidget(self.text_edit)
+
+        self.data_text_edit.setPlainText(data_text)
+        self.result_text_edit.setPlainText(result_text)
+        layout.addWidget(QLabel("输入数据"))
+        layout.addWidget(self.data_text_edit)
+        layout.addWidget(QLabel("评价文本"))
+        layout.addWidget(self.result_text_edit)
+        
+        #   隶属矩阵展示
         self.detail_matrix=QGroupBox('隶属矩阵')
         detail_layout=QVBoxLayout()
         rows,cols=R.shape
@@ -238,7 +268,7 @@ class MainWindow(QMainWindow):
         #   排流效果
         drainage=QGroupBox("排流效果")
         drainage_layout=QHBoxLayout()
-        drainage_layout.addWidget(QLabel("排流效果评价（仅当杂散电流干扰评价为弱以上时进行）"))
+        drainage_layout.addWidget(QLabel("排流效果评价（当杂散电流干扰评价为弱时有效，否则无效）"))
         self.drainage=QRadioButton("有效")
         self.drainage_0=QRadioButton("无效")
         drainage_layout.addWidget(self.drainage)
@@ -409,7 +439,7 @@ class MainWindow(QMainWindow):
                 drainage=drainage_eff
             )
             result=self.calculate(data=data0)
-            self.show_result(R=result[0],final_score=result[1])
+            self.show_result(R=result[0],final_score=result[1],data=result[2])
         except ValueError as e:
             QMessageBox.warning(self, "输入验证失败", str(e))
     
@@ -483,12 +513,12 @@ class MainWindow(QMainWindow):
         s_l=np.sum(v_a*c_l)/np.sum(v_a)
         s_=(s_h+s_m+s_l)/3.00
 
-        return (R_matrix,s_)
+        return (R_matrix,s_,asdict(data))
 
 
 
-    def show_result(self,R,final_score):
-        dialog=ResultDialog(parent=self,R=R,score=final_score)
+    def show_result(self,R,final_score,data):
+        dialog=ResultDialog(parent=self,R=R,score=final_score,data=data)
         dialog.exec()
 
 app = QApplication(sys.argv)
