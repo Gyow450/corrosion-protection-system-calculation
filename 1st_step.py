@@ -49,21 +49,25 @@ class CPSC_Data:
         return "；".join(errors)
     
     @classmethod
-    def alias_map(cls)->dict[str,str]:
+    def alias_name_trans(cls,reverse=False)->dict[str,str]:
+        """字段名：别名构成的字典，或相反"""
         mapping_table={
-            'pip_d':'管径（mm）',
-            'c_type':'防腐层类型',
-            'c_rg':'防腐层绝缘电阻率Rg值（kΩ·㎡）',
-            'c_p':'防腐层破损点密度P值（处/100m）',
-            'c_y':'防腐层电流衰减率Y值（dB/m）',
-            'cp_value':'阴极保护率',
-            'cp_exist':'是否建设有阴极保护',
-            'dc_stray':'阴保管道电位正于要求的比例或无阴保管道正于自然电位20mV的比例',
-            'ac_stray':'交流电流密度',
-            'soil_n':'土壤腐蚀性评价N值',
-            'drainage':'排流效果',
+            ('pip_d','管径（mm）'),
+            ('c_type','防腐层类型'),
+            ('c_rg','防腐层绝缘电阻率Rg值（kΩ·㎡）'),
+            ('c_p','防腐层破损点密度P值（处/100m）'),
+            ('c_y','防腐层电流衰减率Y值（dB/m）'),
+            ('cp_value','阴极保护率'),
+            ('cp_exist','是否建设有阴极保护'),
+            ('dc_stray','阴保管道电位正于要求的比例或无阴保管道正于自然电位20mV的比例'),
+            ('ac_stray','交流电流密度'),
+            ('soil_n','土壤腐蚀性评价N值'),
+            ('drainage','排流效果'),
         }
-        return mapping_table
+        if reverse:
+            return dict(map(reversed,mapping_table))
+        else:
+            return dict(mapping_table)
 
 
 class ResultDialog(QDialog):
@@ -91,7 +95,7 @@ class ResultDialog(QDialog):
         self.result_text_edit.setFixedHeight(100)
         data_text=''
         for key,value in data.items():
-            data_text += f"{CPSC_Data.alias_map()[key]}：{value}；" if value else ''
+            data_text += f"{CPSC_Data.alias_name_trans()[key]}：{value}；" if value else ''
         result_text = f"腐蚀防护系统质量评价得分为{score:.2f}，"
         if score>=90:
             result_text+='等级评价为“1”级，系统功能完好，满足设计要求，在6年的检验周期内能有效使用'
